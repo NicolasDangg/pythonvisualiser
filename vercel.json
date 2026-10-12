@@ -1,0 +1,6 @@
+{
+  "rewrites": [{ "source": "/run", "destination": "/api/run" }],
+  "functions": {
+    "api/run.py": { "includeFiles": "tracer.py", "maxDuration": 15 }
+  }
+}

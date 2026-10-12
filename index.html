@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Python Visualiser</title>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --muted:#777; --line:#ddd; --panel:#f6f6f7; --cur:#d33; --prev:#3a3; --hl:#ffe08a; --code-hl:#fff3c4; }
+  :root { color-scheme:light; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0 8px 0 0; }
+  main { display:grid; grid-template-columns:minmax(320px, 40%) 1fr; height:calc(100vh - 49px); }
+  @media (max-width: 800px) { main { grid-template-columns:1fr; height:auto; } }
+  .col { overflow:auto; padding:12px; }
+  .col + .col { border-left:1px solid var(--line); }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:16px 0 6px; }
+  h2:first-child { margin-top:0; }
+  textarea, pre, code, .mono { font-family:ui-monospace, Menlo, Consolas, monospace; font-size:13px; }
+  textarea { width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px; tab-size:4; }
+  #code { height:55vh; white-space:pre; }
+  #stdin { height:48px; }
+  button, select { font:inherit; padding:4px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--fg); cursor:pointer; }
+  button.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+  button:disabled { opacity:.4; cursor:default; }
+  #controls { display:flex; gap:6px; align-items:center; margin:8px 0; flex-wrap:wrap; }
+  #slider { flex:1; min-width:120px; }
+  #stepBtns { display:flex; gap:8px; margin:0 0 8px; }
+  #stepBtns button { flex:1; padding:8px 12px; font-weight:600; }
+  #status { color:var(--muted); font-size:12px; min-height:1.4em; }
+  #status.err, .err { color:var(--cur); }
+  #viewer { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:6px 0; overflow:auto; max-height:55vh; }
+  .ln { display:flex; white-space:pre; padding:0 8px; }
+  .ln .g { width:20px; flex:none; font-weight:bold; }
+  .ln .n { width:32px; flex:none; color:var(--muted); text-align:right; padding-right:10px; user-select:none; }
+  .ln.cur { background:var(--code-hl); }
+  .ln.cur .g { color:var(--cur); }
+  .ln.prev .g { color:var(--prev); }
+  #out { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px; min-height:40px; max-height:160px; overflow:auto; margin:0; white-space:pre-wrap; }
+  .diagram { border:1px solid var(--line); border-radius:6px; padding:8px; margin-bottom:10px; overflow:auto; background:var(--bg); }
+  .diagram .t { font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .diagram svg { max-width:100%; height:auto; }
+  #mem { display:grid; grid-template-columns:minmax(180px, 1fr) 2fr; gap:12px; align-items:start; }
+  .frame, .obj { border:1px solid var(--line); border-radius:6px; margin-bottom:8px; background:var(--panel); }
+  .frame.top { border-color:#2563eb; }
+  .frame > .h, .obj > .h { padding:3px 8px; font-weight:600; border-bottom:1px solid var(--line); font-size:12px; }
+  .obj > .h span { color:var(--muted); font-weight:400; }
+  table { border-collapse:collapse; width:100%; }
+  td { padding:2px 8px; border-top:1px solid var(--line); vertical-align:top; }
+  tr:first-child td { border-top:none; }
+  td.k { color:var(--muted); width:1%; white-space:nowrap; }
+  .seq { display:flex; flex-wrap:wrap; padding:6px; gap:0; }
+  .cell { border:1px solid var(--line); min-width:32px; text-align:center; }
+  .cell .i { font-size:10px; color:var(--muted); border-bottom:1px solid var(--line); }
+  .cell .v { padding:2px 4px; }
+  .ref { background:#2563eb22; color:#2563eb; border-radius:4px; padding:0 4px; cursor:pointer; }
+  .flash { outline:2px solid #f59e0b; }
+  .muted { color:var(--muted); }
+  label { user-select:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🐍 Python Visualiser</h1>
+  <select id="examples"><option value="">Examples…</option></select>
+  <button id="runBtn" class="primary">Visualise ▶</button>
+  <button id="editBtn" disabled>Edit code</button>
+  <label><input type="checkbox" id="memGraph"> memory graph</label>
+  <span class="muted" style="margin-left:auto;font-size:12px">← → to step · call <code>mermaid(src, title)</code> for custom diagrams</span>
+</header>
+<main>
+  <section class="col">
+    <textarea id="code" spellcheck="false"></textarea>
+    <div id="viewer" hidden></div>
+    <div id="controls">
+      <button id="first" disabled>⏮</button>
+      <button id="back" disabled>◀</button>
+      <input type="range" id="slider" min="0" max="0" value="0" disabled>
+      <button id="fwd" disabled>▶</button>
+      <button id="last" disabled>⏭</button>
+    </div>
+    <div id="stepBtns">
+      <button id="prevBtn" disabled>◀ Previous</button>
+      <button id="nextBtn" class="primary" disabled>Next ▶</button>
+    </div>
+    <div id="status"></div>
+    <h2>stdin (one line per input() call)</h2>
+    <textarea id="stdin" spellcheck="false"></textarea>
+    <h2>Output</h2>
+    <pre id="out"></pre>
+  </section>
+  <section class="col">
+    <h2>Structures</h2>
+    <div id="diagrams"><p class="muted">Run your code and step through it. Trees, linked lists, circular queues, graphs and heaps are detected and drawn automatically.</p></div>
+    <h2>Frames &amp; objects</h2>
+    <div id="mem"><div id="frames"></div><div id="objects"></div></div>
+  </section>
+</main>
+
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs';
+
+mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' });
+
+/* ---------------- examples ---------------- */
+const EXAMPLES = {
+'Binary search tree': `class Node:
+    def __init__(self, val):
+        self.val = val
+        self.left = None
+        self.right = None
+
+def insert(root, val):
+    if root is None:
+        return Node(val)
+    if val < root.val:
+        root.left = insert(root.left, val)
+    else:
+        root.right = insert(root.right, val)
+    return root
+
+def inorder(node, out):
+    if node:
+        inorder(node.left, out)
+        out.append(node.val)
+        inorder(node.right, out)
+
+root = None
+for v in [8, 3, 10, 1, 6, 14, 4, 7]:
+    root = insert(root, v)
+
+result = []
+inorder(root, result)
+print(result)
+`,
+'Linked list reverse': `class ListNode:
+    def __init__(self, val, next=None):
+        self.val = val
+        self.next = next
+
+head = ListNode(1, ListNode(2, ListNode(3, ListNode(4))))
+
+prev, cur = None, head
+while cur:
+    nxt = cur.next
+    cur.next = prev
+    prev = cur
+    cur = nxt
+head = prev
+`,
+'Circular queue': `class CircularQueue:
+    def __init__(self, k):
+        self.data = [None] * k
+        self.front = 0
+        self.rear = -1
+        self.size = 0
+
+    def enqueue(self, x):
+        if self.size == len(self.data):
+            return False
+        self.rear = (self.rear + 1) % len(self.data)
+        self.data[self.rear] = x
+        self.size += 1
+        return True
+
+    def dequeue(self):
+        if self.size == 0:
+            return None
+        x = self.data[self.front]
+        self.data[self.front] = None
+        self.front = (self.front + 1) % len(self.data)
+        self.size -= 1
+        return x
+
+q = CircularQueue(5)
+for i in range(1, 6):
+    q.enqueue(i * 10)
+q.dequeue()
+q.dequeue()
+q.enqueue(60)
+q.enqueue(70)
+`,
+'Graph BFS': `from collections import deque
+
+graph = {
+    'A': ['B', 'C'],
+    'B': ['A', 'D', 'E'],
+    'C': ['A', 'F'],
+    'D': ['B'],
+    'E': ['B', 'F'],
+    'F': ['C', 'E'],
+}
+
+def bfs(start):
+    visited = {start}
+    queue = deque([start])
+    order = []
+    while queue:
+        node = queue.popleft()
+        order.append(node)
+        for nb in graph[node]:
+            if nb not in visited:
+                visited.add(nb)
+                queue.append(nb)
+    return order
+
+print(bfs('A'))
+`,
+'Min-heap (heapq)': `import heapq
+
+heap = []
+for x in [5, 3, 8, 1, 9, 2, 7]:
+    heapq.heappush(heap, x)
+
+smallest = heapq.heappop(heap)
+print(smallest, heap)
+`,
+'N-ary tree': `class TreeNode:
+    def __init__(self, name):
+        self.name = name
+        self.children = []
+
+root = TreeNode('root')
+a, b = TreeNode('a'), TreeNode('b')
+root.children += [a, b]
+a.children += [TreeNode('a1'), TreeNode('a2')]
+b.children.append(TreeNode('b1'))
+
+def count(node):
+    return 1 + sum(count(c) for c in node.children)
+
+print(count(root))
+`,
+'Custom mermaid()': `# mermaid(src, title) is built in: draw anything you like.
+def draw_stack(stack):
+    lines = ["flowchart TB"]
+    for i, v in enumerate(reversed(stack)):
+        lines.append(f'  s{i}["{v}"]')
+    for i in range(len(stack) - 1):
+        lines.append(f"  s{i} --- s{i+1}")
+    mermaid("\\n".join(lines), title="stack (top first)")
+
+stack = []
+for ch in "(a[b]{c})":
+    if ch in "([{":
+        stack.append(ch)
+        draw_stack(stack)
+    elif ch in ")]}":
+        stack.pop()
+        draw_stack(stack)
+print("balanced" if not stack else "unbalanced")
+`,
+};
+const exSel = document.getElementById('examples');
+for (const k of Object.keys(EXAMPLES)) exSel.add(new Option(k, k));
+exSel.onchange = () => { if (exSel.value) { setEditing(true); codeEl.value = EXAMPLES[exSel.value]; } exSel.value = ''; };
+
+/* ---------------- helpers ---------------- */
+const $ = id => document.getElementById(id);
+const codeEl = $('code'), viewer = $('viewer');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// escape text for a quoted mermaid label
+const mq = s => String(s).replace(/#/g, '#35;').replace(/"/g, '#quot;').replace(/</g, '#lt;').replace(/>/g, '#gt;');
+const F = o => (o && o.k === 'obj') ? Object.fromEntries(o.fields) : {};
+const isRef = v => v && 'r' in v;
+const VALF = ['val', 'value', 'key', 'data', 'item', 'elem', 'name', 'v', 'x'];
+const CLASSDEFS = [
+  'classDef hl fill:#ffe08a,stroke:#b8860b,color:#000',
+  'classDef seen fill:#bfe3c0,stroke:#3a3,color:#000',
+  'classDef nil fill:none,stroke:none,color:transparent',
+  'classDef none fill:none,stroke:#999,stroke-dasharray:3 3,color:#999',
+  'classDef empty fill:none,stroke:#999,color:#999',
+];
+
+let code = '', steps = [], cur = 0, renderToken = 0;
+const svgCache = new Map();
+
+/* ---------------- running ---------------- */
+codeEl.addEventListener('keydown', e => {
+  if (e.key === 'Tab') { e.preventDefault(); codeEl.setRangeText('    ', codeEl.selectionStart, codeEl.selectionEnd, 'end'); }
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) run();
+});
+$('runBtn').onclick = run;
+$('editBtn').onclick = () => setEditing(true);
+
+function setEditing(on) {
+  codeEl.hidden = !on; viewer.hidden = on; $('editBtn').disabled = on;
+  if (on) { steps = []; setControls(); }
+}
+
+async function run() {
+  code = codeEl.value;
+  $('status').className = ''; $('status').textContent = 'Running…';
+  try { localStorage.setItem('pyviz-code', code); } catch {}
+  let res;
+  try {
+    const r = await fetch('/run', { method: 'POST', body: JSON.stringify({ code, stdin: $('stdin').value }) });
+    res = await r.json();
+  } catch (e) { return showErr('Could not reach server: ' + e); }
+  steps = res.steps || [];
+  if (!steps.length) return showErr(res.error + (res.errorLine ? ` (line ${res.errorLine})` : ''));
+  setEditing(false);
+  cur = 0; setControls(); go(0);
+}
+function showErr(msg) { $('status').className = 'err'; $('status').textContent = msg; }
+
+/* ---------------- stepping ---------------- */
+const slider = $('slider');
+function setControls() {
+  const has = steps.length > 0;
+  for (const id of ['first', 'back', 'fwd', 'last']) $(id).disabled = !has;
+  slider.disabled = !has; slider.max = Math.max(0, steps.length - 1);
+  $('prevBtn').disabled = !has || cur === 0;
+  $('nextBtn').disabled = !has || cur === steps.length - 1;
+}
+function go(i) { if (!steps.length) return; cur = Math.max(0, Math.min(steps.length - 1, i)); slider.value = cur; setControls(); render(); }
+$('prevBtn').onclick = () => go(cur - 1);
+$('nextBtn').onclick = () => go(cur + 1);
+$('first').onclick = () => go(0);
+$('back').onclick = () => go(cur - 1);
+$('fwd').onclick = () => go(cur + 1);
+$('last').onclick = () => go(steps.length - 1);
+slider.oninput = () => go(+slider.value);
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'TEXTAREA' || !steps.length) return;
+  if (e.key === 'ArrowRight') go(cur + 1);
+  if (e.key === 'ArrowLeft') go(cur - 1);
+});
+
+/* ---------------- rendering ---------------- */
+function render() {
+  const s = steps[cur], prev = steps[cur - 1];
+  // code
+  viewer.innerHTML = code.split('\n').map((t, i) => {
+    const n = i + 1, isCur = n === s.line, isPrev = prev && n === prev.line && !isCur;
+    return `<div class="ln${isCur ? ' cur' : ''}${isPrev ? ' prev' : ''}"><span class="g">${isCur ? '➜' : isPrev ? '→' : ''}</span><span class="n">${n}</span>${esc(t) || ' '}</div>`;
+  }).join('');
+  viewer.querySelector('.cur')?.scrollIntoView({ block: 'nearest' });
+  // status
+  const top = s.stack.at(-1);
+  let st = `Step ${cur + 1}/${steps.length} · line ${s.line}`;
+  if (s.event === 'return' && top.ret) st += ` · ${top.name} returns ${valText(top.ret, s.heap)}`;
+  $('status').className = s.exc ? 'err' : '';
+  $('status').textContent = s.exc ? `${st} · ${s.exc}` : st;
+  $('out').textContent = s.stdout;
+  renderMemory(s);
+  renderDiagrams(s);
+}
+
+function valText(v, H) {
+  if (!v) return '';
+  if (!isRef(v)) return v.p;
+  const o = H[v.r];
+  return `#${v.r} ${o?.type ?? ''}`;
+}
+function valHtml(v, H) {
+  if (!isRef(v)) return esc(v.p);
+  const o = H[v.r];
+  return `<span class="ref" data-id="${v.r}">#${v.r} ${esc(o?.name ?? o?.type ?? '')}</span>`;
+}
+
+function renderMemory(s) {
+  const H = s.heap;
+  $('frames').innerHTML = s.stack.map((f, i) => `
+    <div class="frame${i === s.stack.length - 1 ? ' top' : ''}"><div class="h">${esc(f.name)}</div>
+    <table>${f.vars.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td>${valHtml(v, H)}</td></tr>`).join('')}
+    ${f.ret ? `<tr><td class="k">↩ return</td><td>${valHtml(f.ret, H)}</td></tr>` : ''}</table></div>`).join('');
+  $('objects').innerHTML = Object.keys(H).sort((a, b) => a - b).map(id => {
+    const o = H[id]; if (!o) return '';
+    let body = '';
+    if (o.k === 'seq') body = `<div class="seq">${o.items.map((v, i) => `<div class="cell"><div class="i">${o.type === 'set' ? '' : i}</div><div class="v">${valHtml(v, H)}</div></div>`).join('') || '<span class="muted">empty</span>'}${o.more ? `<span class="muted">… +${o.more}</span>` : ''}</div>`;
+    else if (o.k === 'dict') body = `<table>${o.items.map(([k, v]) => `<tr><td class="k">${valHtml(k, H)}</td><td>${valHtml(v, H)}</td></tr>`).join('')}</table>`;
+    else if (o.k === 'obj') body = `<table>${o.fields.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td>${valHtml(v, H)}</td></tr>`).join('')}</table>`;
+    else body = `<div style="padding:3px 8px" class="mono">${esc(o.name ?? o.repr)}</div>`;
+    return `<div class="obj" id="obj-${id}"><div class="h">#${id} <span>${esc(o.type)}</span></div>${body}</div>`;
+  }).join('');
+}
+document.addEventListener('click', e => {
+  const r = e.target.closest('.ref'); if (!r) return;
+  const el = $('obj-' + r.dataset.id); if (!el) return;
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 900);
+});
+
+async function renderDiagrams(s) {
+  const token = ++renderToken;
+  const c = context(s);
+  const list = [
+    ...Object.entries(s.custom).map(([t, src]) => [t, src]),
+    ...[binaryTrees, naryTrees, linkedLists, circularQueues, graphs, arrayHeaps].flatMap(fn => fn(c)),
+  ];
+  if ($('memGraph').checked) list.push(['memory graph', memoryGraph(s)]);
+  const out = [];
+  for (const [title, src] of list) {
+    let svg = svgCache.get(src);
+    if (!svg) {
+      try { svg = (await mermaid.render('m' + Math.random().toString(36).slice(2), src)).svg; }
+      catch (e) { svg = `<pre class="err">${esc(e.message || e)}\n\n${esc(src)}</pre>`; }
+      svgCache.set(src, svg);
+    }
+    if (token !== renderToken) return; // a newer step started rendering
+    out.push(`<div class="diagram"><div class="t">${esc(title)}</div>${svg}</div>`);
+  }
+  $('diagrams').innerHTML = out.join('') || '<p class="muted">No structures detected at this step.</p>';
+}
+$('memGraph').onchange = () => steps.length && render();
+
+/* ---------------- structure detection ---------------- */
+// Variable names (innermost + global frame) pointing at each object / primitive value.
+function context(s) {
+  const H = s.heap, frames = [...new Set([s.stack.at(-1), s.stack[0]])];
+  const refNames = {}, primNames = {};
+  for (const f of frames) for (const [k, v] of f.vars) {
+    if (isRef(v)) (refNames[v.r] ??= []).push(k); else (primNames[v.p] ??= []).push(k);
+  }
+  return { s, H, refNames, primNames, frames };
+}
+// Names for nodes: variables + fields of non-node objects (e.g. LinkedList.head, BST.root).
+function pointerNames(c, ids) {
+  const set = new Set(ids.map(String)), names = {};
+  for (const id of ids) if (c.refNames[id]) names[id] = [...c.refNames[id]];
+  for (const [oid, o] of Object.entries(c.H)) {
+    if (set.has(oid) || o?.k !== 'obj') continue;
+    for (const [k, v] of o.fields) if (isRef(v) && set.has(String(v.r))) (names[v.r] ??= []).push(k);
+  }
+  return names;
+}
+const tag = names => names?.length ? `<br/><i>${mq([...new Set(names)].join(', '))}</i>` : '';
+function nodeLabel(o) {
+  const f = F(o);
+  for (const k of VALF) if (f[k] && !isRef(f[k])) return f[k].p;
+  return o.type;
+}
+function nodeLines(c, ids, names, shape = ['["', '"]']) {
+  const L = [];
+  for (const id of ids) {
+    L.push(`n${id}${shape[0]}${mq(nodeLabel(c.H[id]))}${tag(names[id])}${shape[1]}`);
+    if (names[id]) L.push(`class n${id} hl`);
+  }
+  return L;
+}
+
+function binaryTrees(c) {
+  const H = c.H, isT = o => o?.k === 'obj' && 'left' in F(o) && 'right' in F(o);
+  const ids = Object.keys(H).filter(i => isT(H[i]));
+  if (!ids.length) return [];
+  const names = pointerNames(c, ids), L = ['flowchart TD', ...CLASSDEFS, ...nodeLines(c, ids, names, ['(("', '"))'])];
+  let nil = 0;
+  for (const id of ids) {
+    const f = F(H[id]);
+    const kids = [f.left, f.right].map(v => isRef(v) && isT(H[v.r]) ? v.r : null);
+    if (kids[0] == null && kids[1] == null) continue;
+    for (const k of kids) {
+      if (k != null) L.push(`n${id} --> n${k}`);
+      else { nil++; L.push(`x${nil}[" "]:::nil`, `n${id} ~~~ x${nil}`); } // keeps left/right order
+    }
+  }
+  return [['binary tree', L.join('\n')]];
+}
+
+function naryTrees(c) {
+  const H = c.H;
+  const kidsOf = o => { const v = F(o).children; return isRef(v) && H[v.r]?.k === 'seq' ? H[v.r].items.filter(isRef).map(x => x.r) : null; };
+  const ids = Object.keys(H).filter(i => H[i]?.k === 'obj' && kidsOf(H[i]));
+  if (!ids.length) return [];
+  const names = pointerNames(c, ids), L = ['flowchart TD', ...CLASSDEFS, ...nodeLines(c, ids, names)];
+  for (const id of ids) for (const k of kidsOf(H[id])) if (ids.includes(String(k))) L.push(`n${id} --> n${k}`);
+  return [['tree', L.join('\n')]];
+}
+
+function linkedLists(c) {
+  const H = c.H, isN = o => o?.k === 'obj' && 'next' in F(o) && !('left' in F(o));
+  const ids = Object.keys(H).filter(i => isN(H[i]));
+  if (!ids.length) return [];
+  const names = pointerNames(c, ids), L = ['flowchart LR', ...CLASSDEFS, ...nodeLines(c, ids, names)];
+  for (const id of ids) {
+    const f = F(H[id]);
+    if (isRef(f.next)) L.push(`n${id} --> n${f.next.r}`);
+    else L.push(`z${id}["None"]:::none`, `n${id} --> z${id}`);
+    if (isRef(f.prev)) L.push(`n${id} -.->|prev| n${f.prev.r}`);
+  }
+  return [['linked list', L.join('\n')]];
+}
+
+function circularQueues(c) {
+  const H = c.H, out = [];
+  const pick = (f, keys) => { for (const k of keys) if (f[k] && !isRef(f[k]) && /^-?\d+$/.test(f[k].p)) return [k, +f[k].p]; return null; };
+  for (const [oid, o] of Object.entries(H)) {
+    if (o?.k !== 'obj') continue;
+    const f = F(o);
+    const listField = Object.entries(f).find(([, v]) => isRef(v) && H[v.r]?.k === 'seq' && H[v.r].type === 'list');
+    const front = pick(f, ['front', 'head', 'start', 'first']);
+    const rear = pick(f, ['rear', 'tail', 'end', 'last', 'back']);
+    const size = pick(f, ['size', 'count', 'length', 'n']);
+    if (!listField || !front || !(rear || size)) continue;
+    const arr = H[listField[1].r].items, n = arr.length;
+    if (!n) continue;
+    const mod = x => ((x % n) + n) % n;
+    const occupied = size ? new Set(Array.from({ length: size[1] }, (_, i) => mod(front[1] + i))) : null;
+    const L = ['flowchart LR', ...CLASSDEFS];
+    arr.forEach((v, i) => {
+      L.push(`c${i}["[${i}]<br/>${mq(isRef(v) ? '#' + v.r : v.p)}"]`);
+      const used = occupied ? occupied.has(i) : !(v.p === 'None');
+      if (!used) L.push(`class c${i} empty`);
+    });
+    for (let i = 0; i < n - 1; i++) L.push(`c${i} --> c${i + 1}`);
+    if (n > 1) L.push(`c${n - 1} -. wrap .-> c0`);
+    L.push(`F(["${front[0]} = ${front[1]}"]):::hl`, `F --> c${mod(front[1])}`);
+    if (rear) L.push(`R(["${rear[0]} = ${rear[1]}"]):::seen`, `R --> c${mod(rear[1])}`);
+    const title = `circular queue #${oid} (${o.type}.${listField[0]})` + (size ? ` · ${size[0]}=${size[1]}/${n}` : '');
+    out.push([title, L.join('\n')]);
+  }
+  return out;
+}
+
+function graphs(c) {
+  const H = c.H, out = [];
+  // sets/lists bound to names like visited/seen colour nodes green
+  const seen = new Set();
+  for (const f of c.frames) for (const [k, v] of f.vars)
+    if (/visit|seen|done/i.test(k) && isRef(v) && H[v.r]?.k === 'seq') H[v.r].items.forEach(x => !isRef(x) && seen.add(x.p));
+  for (const [oid, o] of Object.entries(H)) {
+    if (o?.k !== 'dict' || o.items.length < 2) continue;
+    const adj = new Map();
+    let ok = true;
+    for (const [k, v] of o.items) {
+      const seq = isRef(v) && H[v.r];
+      if (isRef(k) || !seq || seq.k !== 'seq' || seq.items.some(isRef)) { ok = false; break; }
+      adj.set(k.p, seq.items.map(x => x.p));
+    }
+    if (!ok) continue;
+    const all = [...adj.values()].flat();
+    if (!all.length || all.filter(x => adj.has(x)).length < all.length / 2) continue;
+    const nodes = [...new Set([...adj.keys(), ...all])], idx = new Map(nodes.map((n, i) => [n, i]));
+    const undirected = [...adj].every(([a, bs]) => bs.every(b => adj.get(b)?.includes(a)));
+    const L = ['flowchart LR', ...CLASSDEFS];
+    for (const n of nodes) {
+      const nm = c.primNames[n];
+      L.push(`g${idx.get(n)}(["${mq(n)}${tag(nm)}"])`);
+      if (nm) L.push(`class g${idx.get(n)} hl`); else if (seen.has(n)) L.push(`class g${idx.get(n)} seen`);
+    }
+    const done = new Set();
+    for (const [a, bs] of adj) for (const b of bs) {
+      const key = undirected ? [a, b].sort().join('\0') : a + '\0' + b;
+      if (done.has(key)) continue; done.add(key);
+      L.push(`g${idx.get(a)} ${undirected ? '---' : '-->'} g${idx.get(b)}`);
+    }
+    const names = c.refNames[oid]?.join(', ') ?? `#${oid}`;
+    out.push([`graph ${names} (${undirected ? 'undirected' : 'directed'})`, L.join('\n')]);
+  }
+  return out;
+}
+
+// A flat list bound to a variable called *heap* / *tree* is drawn as an implicit binary tree.
+function arrayHeaps(c) {
+  const out = [];
+  for (const f of c.frames) for (const [k, v] of f.vars) {
+    const o = isRef(v) && c.H[v.r];
+    if (!/heap|tree/i.test(k) || !o || o.k !== 'seq' || !o.items.length || o.items.length > 63 || o.items.some(isRef)) continue;
+    const a = o.items, L = ['flowchart TD', ...CLASSDEFS];
+    a.forEach((x, i) => L.push(`h${i}(("${mq(x.p)}<br/><i>[${i}]</i>"))`));
+    let nil = 0;
+    a.forEach((_, i) => {
+      const l = 2 * i + 1, r = 2 * i + 2;
+      if (l >= a.length) return;
+      L.push(`h${i} --> h${l}`);
+      if (r < a.length) L.push(`h${i} --> h${r}`); else { nil++; L.push(`x${nil}[" "]:::nil`, `h${i} ~~~ x${nil}`); }
+    });
+    out.push([`${k} as binary tree (array)`, L.join('\n')]);
+  }
+  return out;
+}
+
+// Whole-memory picture: frames on the left, every object as a node, references as arrows.
+function memoryGraph(s) {
+  const H = s.heap, L = ['flowchart LR'];
+  const short = v => isRef(v) ? '•' : v.p;
+  s.stack.forEach((f, fi) => {
+    L.push(`subgraph f${fi}["${mq(f.name)}"]`);
+    f.vars.forEach(([k, v], vi) => L.push(`v${fi}_${vi}["${mq(isRef(v) ? k : `${k} = ${v.p}`)}"]`));
+    L.push('end');
+    f.vars.forEach(([, v], vi) => isRef(v) && L.push(`v${fi}_${vi} --> o${v.r}`));
+  });
+  for (const id of Object.keys(H).slice(0, 80)) {
+    const o = H[id]; if (!o) continue;
+    let label = o.type, edges = [];
+    if (o.k === 'seq') { label += ` [${o.items.map(short).join(', ')}]`; o.items.forEach((v, i) => isRef(v) && edges.push([i, v.r])); }
+    else if (o.k === 'dict') { label += ` {${o.items.map(([a, b]) => `${short(a)}: ${short(b)}`).join(', ')}}`; o.items.forEach(([a, b]) => isRef(b) && edges.push([isRef(a) ? '' : a.p, b.r])); }
+    else if (o.k === 'obj') { const prims = o.fields.filter(([, v]) => !isRef(v)).map(([k, v]) => `${k}=${v.p}`); if (prims.length) label = mq(label) + '<br/>' + prims.map(mq).join('<br/>'); o.fields.forEach(([k, v]) => isRef(v) && edges.push([k, v.r])); }
+    else label = o.name ?? o.repr;
+    if (o.k !== 'obj' || label === o.type) label = mq(label.length > 60 ? label.slice(0, 60) + '…' : label);
+    L.push(`o${id}["${label}"]`);
+    for (const [k, t] of edges) L.push(k === '' ? `o${id} --> o${t}` : `o${id} -->|"${mq(String(k))}"| o${t}`);
+  }
+  return L.join('\n');
+}
+
+/* ---------------- boot ---------------- */
+const initial = await fetch('/initial').then(r => r.ok ? r.text() : '').catch(() => '');
+let saved = null; try { saved = localStorage.getItem('pyviz-code'); } catch {}
+codeEl.value = initial || saved || EXAMPLES['Binary search tree'];
+</script>
+</body>
+</html>
