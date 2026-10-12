@@ -1,4 +1,9 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "proxy": {
+    "entrypoint": "proxy.js",
+    "matcher": ["/((?!favicon.ico).*)"]
+  },
   "rewrites": [{ "source": "/run", "destination": "/api/run" }],
   "functions": {
     "api/run.py": { "includeFiles": "tracer.py", "maxDuration": 15 }

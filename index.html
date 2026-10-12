@@ -67,6 +67,7 @@
   <button id="runBtn" class="primary">Visualise ▶</button>
   <button id="editBtn" disabled>Edit code</button>
   <label><input type="checkbox" id="memGraph"> memory graph</label>
+  <a id="logout" href="/logout" hidden style="font-size:12px">Log out</a>
   <span class="muted" style="margin-left:auto;font-size:12px">← → to step · call <code>mermaid(src, title)</code> for custom diagrams</span>
 </header>
 <main>
@@ -597,6 +598,7 @@ function memoryGraph(s) {
 }
 
 /* ---------------- boot ---------------- */
+if (!['localhost', '127.0.0.1'].includes(location.hostname)) $('logout').hidden = false;
 const initial = await fetch('/initial').then(r => r.ok ? r.text() : '').catch(() => '');
 let saved = null; try { saved = localStorage.getItem('pyviz-code'); } catch {}
 codeEl.value = initial || saved || EXAMPLES['Binary search tree'];
